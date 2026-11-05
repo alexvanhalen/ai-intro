@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>自己訓練一個影像分類器</title>
+<meta name="description" content="人工智慧概論 第 10 週｜凍結 MobileNet，只訓練最後一層">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* 版面：手機優先單欄，三個編號階段（收樣本 → 訓練 → 測試），上方固定一條「模型結構」提示條 */
+:root{
+  --ink:#16202A; --ink2:#23313F; --paper:#FFFFFF; --tint:#F1F4F7; --solid:#16202A;
+  --text:#1F2A37; --muted:#6B7684; --line:#D8DFE5;
+  --amber:#D9821B; --amber-l:#FAEEDC; --amber-d:#8A5310;
+  --cold:#45718C; --cold-l:#E5EDF2; --red:#B03A2E; --green:#2F7A4F;
+  --font:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ink:#0E151C; --ink2:#1B2733; --paper:#121A22; --tint:#1A242E; --solid:#2B3845;
+    --text:#E6ECF2; --muted:#9AA7B4; --line:#2A3743;
+    --amber:#E89B41; --amber-l:#2A2015; --amber-d:#E89B41;
+    --cold:#7FA8C2; --cold-l:#1B2A35; --red:#E07A6E; --green:#6FC08F;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#0E151C; --ink2:#1B2733; --paper:#121A22; --tint:#1A242E; --solid:#2B3845;
+  --text:#E6ECF2; --muted:#9AA7B4; --line:#2A3743;
+  --amber:#E89B41; --amber-l:#2A2015; --amber-d:#E89B41;
+  --cold:#7FA8C2; --cold-l:#1B2A35; --red:#E07A6E; --green:#6FC08F;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){ --amber-l:#2A2015 } }
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--paper); color:var(--text); font-family:var(--font);
+  font-size:15px; line-height:1.65; -webkit-text-size-adjust:100%;
+}
+.wrap{
+  max-width:720px; margin:0 auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:0 48px;
+}
+h1{font-size:1.45rem; line-height:1.3; margin:0 0 4px; text-wrap:balance}
+h2{font-size:1.05rem; margin:0; text-wrap:balance}
+p{margin:0}
+.kicker{font-size:.7rem; letter-spacing:.14em; font-weight:700; color:var(--amber); text-transform:uppercase; margin:0 0 6px}
+.lede{color:var(--muted); font-size:.9rem; margin-top:6px}
+
+header.top{padding-block:22px 16px; border-bottom:1px solid var(--line)}
+
+/* 模型結構條 */
+.arch{display:flex; gap:8px; align-items:stretch; margin:16px 0 0}
+.arch .half{flex:1 1 0; min-width:0; border-radius:10px; padding:10px 12px}
+.arch .frozen{background:var(--cold-l)}
+.arch .head{background:var(--amber-l)}
+.arch .lab{font-size:.68rem; letter-spacing:.1em; font-weight:700; text-transform:uppercase}
+.arch .frozen .lab{color:var(--cold)} .arch .head .lab{color:var(--amber-d)}
+.arch .big{font-weight:700; font-size:.95rem; margin-top:2px}
+.arch .sub{font-size:.75rem; color:var(--muted); font-variant-numeric:tabular-nums}
+
+section{padding-block:26px; border-bottom:1px solid var(--line)}
+.shead{display:flex; gap:10px; align-items:baseline; margin-bottom:14px}
+.num{flex:0 0 auto; width:26px; height:26px; border-radius:50%; background:var(--amber); color:#fff;
+     font-weight:700; font-size:.8rem; display:grid; place-items:center; transform:translateY(3px)}
+.note{color:var(--muted); font-size:.85rem; margin-top:8px}
+
+/* 相機 */
+.stage{position:relative; background:var(--ink); border-radius:12px; overflow:hidden; aspect-ratio:4/3; max-width:100%}
+.stage video,.stage canvas.live{width:100%; height:100%; object-fit:cover; display:block}
+.stage .msg{position:absolute; inset:0; display:grid; place-items:center; text-align:center;
+            color:#C9D3DC; font-size:.85rem; padding:20px}
+.camrow{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
+
+button{font-family:inherit; font-size:.88rem; border-radius:9px; border:1px solid var(--line);
+       background:var(--paper); color:var(--text); padding:9px 14px; cursor:pointer; line-height:1.3;
+       white-space:nowrap}
+button:focus-visible{outline:2px solid var(--amber); outline-offset:2px}
+button:disabled{opacity:.45; cursor:not-allowed}
+button.primary{background:var(--amber); border-color:var(--amber); color:#fff; font-weight:700}
+button.dark{background:var(--solid); border-color:var(--solid); color:#fff; font-weight:700}
+button.ghost{background:transparent; color:var(--muted)}
+button.tiny{padding:5px 9px; font-size:.75rem}
+
+/* 類別 */
+.classes{display:flex; flex-direction:column; gap:12px}
+.cls{border:1px solid var(--line); border-radius:12px; padding:12px; background:var(--paper)}
+.cls .row1{display:flex; gap:8px; align-items:center}
+.cls input[type=text]{flex:1 1 auto; min-width:0; font-family:inherit; font-size:.95rem; font-weight:700;
+  border:none; border-bottom:1.5px dashed var(--line); background:transparent; color:var(--text); padding:3px 2px}
+.cls input[type=text]:focus{outline:none; border-bottom-color:var(--amber)}
+.count{font-size:.78rem; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap}
+.thumbs{display:flex; gap:4px; overflow-x:auto; margin-top:9px; min-height:38px; padding-bottom:2px}
+.thumbs img{width:38px; height:38px; border-radius:5px; object-fit:cover; flex:0 0 auto}
+.thumbs .empty{font-size:.76rem; color:var(--muted); align-self:center}
+.grab{display:flex; gap:6px; margin-top:9px; flex-wrap:wrap}
+.grab button{flex:1 1 auto}
+
+/* 訓練 */
+.trainbox{background:var(--tint); border-radius:12px; padding:14px}
+.lossrow{display:flex; gap:14px; align-items:center; margin-top:10px}
+#lossChart{flex:1 1 auto; min-width:0; height:78px; width:100%; background:var(--paper); border-radius:8px; border:1px solid var(--line)}
+.stat{font-variant-numeric:tabular-nums; font-size:.8rem; color:var(--muted); white-space:nowrap}
+.stat b{display:block; font-size:1.05rem; color:var(--text)}
+
+/* 預測 */
+.bars{display:flex; flex-direction:column; gap:7px; margin-top:12px}
+.bar{display:grid; grid-template-columns:minmax(60px,26%) 1fr auto; gap:8px; align-items:center}
+.bar .nm{font-size:.85rem; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.bar .track{height:14px; border-radius:7px; background:var(--tint); overflow:hidden; min-width:0}
+.bar .fill{display:block; height:100%; background:var(--cold); width:0%; transition:width .12s linear}
+.bar.top .fill{background:var(--amber)}
+.bar .pct{font-size:.8rem; font-variant-numeric:tabular-nums; color:var(--muted); min-width:3.2em; text-align:right}
+
+.checks{display:flex; flex-direction:column; gap:9px; margin-top:4px}
+.chk{display:flex; gap:9px; align-items:flex-start; font-size:.88rem}
+.chk input{margin-top:4px; flex:0 0 auto; accent-color:var(--amber)}
+.chk .t{display:block; font-weight:500}
+.chk .d{display:block; color:var(--muted); font-size:.82rem; line-height:1.5}
+
+.callout{background:var(--solid); color:#fff; border-radius:12px; padding:14px 16px; font-weight:500; font-size:.92rem}
+.callout .s{display:block; color:#B7C2CC; font-weight:400; font-size:.82rem; margin-top:5px}
+.warn{background:var(--amber-l); color:var(--amber-d); border-radius:10px; padding:11px 13px; font-size:.85rem}
+footer{padding-block:22px; color:var(--muted); font-size:.78rem}
+.hide{display:none!important}
+@media (prefers-reduced-motion:reduce){*{transition:none!important; animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <p class="kicker">人工智慧概論・第 10 週</p>
+  <h1>自己訓練一個影像分類器</h1>
+  <p class="lede">整個運算都在你的手機裡跑。照片不會上傳到任何地方，關掉分頁就全部消失。</p>
+
+  <div class="arch">
+    <div class="half frozen">
+      <div class="lab">前半段・凍結</div>
+      <div class="big">MobileNet</div>
+      <div class="sub" id="frozenSub">載入中…</div>
+    </div>
+    <div class="half head">
+      <div class="lab">後半段・你來訓練</div>
+      <div class="big">你的分類層</div>
+      <div class="sub" id="headSub">尚未建立</div>
+    </div>
+  </div>
+  <p class="note">這就是第 25 張講的遷移學習第 1 種：別人在上百萬張照片上訓練好的前半段原封不動，你只訓練最後那一小層。</p>
+</header>
+
+<section>
+  <div class="shead"><div class="num">1</div><div><h2>收樣本</h2></div></div>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="msg" id="camMsg">正在開啟相機…</div>
+  </div>
+
+  <div class="camrow">
+    <button id="btnCam" class="dark">開啟相機</button>
+    <button id="btnFlip" class="ghost" disabled>切換前後鏡頭</button>
+    <button id="btnPhoto" class="ghost hide">改用拍照上傳</button>
+  </div>
+  <p class="warn hide" id="camWarn"></p>
+
+  <div class="classes" id="classes"></div>
+
+  <div class="camrow">
+    <button id="btnAddClass" class="ghost tiny">＋ 新增一個類別</button>
+    <button id="btnClearAll" class="ghost tiny">清空所有樣本</button>
+  </div>
+
+  <p class="note">每個類別至少 15 張，拍的時候刻意換角度、換距離、換背景——你等一下就會知道為什麼。</p>
+</section>
+
+<section>
+  <div class="shead"><div class="num">2</div><div><h2>訓練</h2></div></div>
+
+  <div class="trainbox">
+    <button id="btnTrain" class="primary" disabled>開始訓練</button>
+    <div class="lossrow">
+      <canvas id="lossChart" width="600" height="140" aria-label="訓練損失曲線"></canvas>
+      <div class="stat">回合<b id="statEpoch">—</b></div>
+      <div class="stat">損失<b id="statLoss">—</b></div>
+    </div>
+    <p class="note" id="trainNote">兩個類別、各 15 張以上就可以按。訓練只動後半段那幾萬個參數，所以幾秒就跑完。</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><div class="num">3</div><div><h2>測試，然後想辦法弄壞它</h2></div></div>
+
+  <div class="bars" id="bars"><p class="note">訓練完成後，這裡會即時顯示模型對鏡頭畫面的判斷。</p></div>
+
+  <div class="checks" id="checks">
+    <label class="chk"><input type="checkbox">
+      <span><span class="t">換一個背景</span><span class="d">同一個東西，走到牆邊、桌上、窗前各測一次。信心度掉了嗎？</span></span></label>
+    <label class="chk"><input type="checkbox">
+      <span><span class="t">移到畫面角落、拿遠一點</span><span class="d">它學到的是「這個東西」，還是「畫面中間那一塊」？</span></span></label>
+    <label class="chk"><input type="checkbox">
+      <span><span class="t">把燈關掉或背光</span><span class="d">亮度一變就失準，代表亮度本身被當成了特徵。</span></span></label>
+    <label class="chk"><input type="checkbox">
+      <span><span class="t">故意做一個會作弊的資料集</span><span class="d">A 類全部在窗邊拍、B 類全部在桌上拍，然後互換背景再測。這就是第 6 週的資料洩漏。</span></span></label>
+  </div>
+
+  <p class="callout" style="margin-top:16px">在看過的資料上表現好，什麼都證明不了。
+    <span class="s">作業七要交的是「你讓它錯在哪裡，以及為什麼」——不是你的模型有多準。</span></p>
+</section>
+
+<footer>
+  模型在裝置端執行，使用 TensorFlow.js 與 MobileNet。重新整理頁面即清除所有樣本與模型。
+</footer>
+
+</div>
+
+<input type="file" id="fileIn" accept="image/*" multiple class="hide">
+<canvas id="work" width="224" height="224" class="hide"></canvas>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var video = $("video"), work = $("work"), wctx = work.getContext("2d", { willReadFrequently: true });
+  var camMsg = $("camMsg"), camWarn = $("camWarn"), fileIn = $("fileIn");
+
+  var net = null, embDim = 0, head = null, stream = null, facing = "environment";
+  var photoMode = false, predTimer = null, burstTimer = null, pendingTarget = null;
+  var classes = [];
+  var nextId = 1;
+
+  /* ---------- 類別資料 ---------- */
+  function addClass(name) {
+    classes.push({ id: nextId++, name: name || ("類別 " + (classes.length + 1)), samples: [] });
+    renderClasses();
+    refreshState();
+  }
+  function totalSamples() {
+    return classes.reduce(function (a, c) { return a + c.samples.length; }, 0);
+  }
+  function readyClasses() {
+    return classes.filter(function (c) { return c.samples.length >= 2; }).length;
+  }
+
+  function updateClassView(c) {
+    if (!c.el) return;
+    c.cntEl.textContent = c.samples.length + " 張";
+    var th = c.thEl;
+    if (c.samples.length === 0) {
+      th.textContent = "";
+      var e = document.createElement("span");
+      e.className = "empty"; e.textContent = "還沒有樣本";
+      th.appendChild(e);
+      return;
+    }
+    if (th.firstChild && th.firstChild.className === "empty") th.textContent = "";
+    while (th.childElementCount < Math.min(c.samples.length, 40)) {
+      var im = document.createElement("img");
+      im.alt = "";
+      th.appendChild(im);
+    }
+    var shown = c.samples.slice(-th.childElementCount);
+    for (var i = 0; i < th.childElementCount; i++) {
+      var want = shown[i].thumb;
+      if (th.children[i].src !== want) th.children[i].src = want;
+    }
+    th.scrollLeft = th.scrollWidth;
+  }
+
+  function renderClasses() {
+    var box = $("classes");
+    box.textContent = "";
+    classes.forEach(function (c) {
+      var el = document.createElement("div");
+      el.className = "cls";
+
+      var r1 = document.createElement("div");
+      r1.className = "row1";
+      var inp = document.createElement("input");
+      inp.type = "text"; inp.value = c.name; inp.setAttribute("aria-label", "類別名稱");
+      inp.id = "clsname" + c.id;
+      inp.addEventListener("input", function () { c.name = inp.value || "未命名"; });
+      var cnt = document.createElement("span");
+      cnt.className = "count";
+      var del = document.createElement("button");
+      del.className = "ghost tiny"; del.type = "button"; del.textContent = "刪除";
+      del.addEventListener("click", function () {
+        classes = classes.filter(function (x) { return x !== c; });
+        dropHead(); renderClasses(); refreshState();
+      });
+      r1.appendChild(inp); r1.appendChild(cnt); r1.appendChild(del);
+
+      var th = document.createElement("div");
+      th.className = "thumbs";
+
+      var g = document.createElement("div");
+      g.className = "grab";
+      var hold = document.createElement("button");
+      hold.type = "button"; hold.className = "dark";
+      hold.style.touchAction = "none";
+      hold.textContent = "按住連拍";
+      bindHold(hold, c);
+      var one = document.createElement("button");
+      one.type = "button"; one.className = "ghost";
+      one.textContent = photoMode ? "拍照／選圖加入" : "拍一張";
+      one.addEventListener("click", function () {
+        if (photoMode) { pendingTarget = c; fileIn.click(); }
+        else { grab(c); }
+      });
+      if (photoMode) hold.classList.add("hide");
+      g.appendChild(hold); g.appendChild(one);
+
+      el.appendChild(r1); el.appendChild(th); el.appendChild(g);
+      box.appendChild(el);
+
+      c.el = el; c.cntEl = cnt; c.thEl = th;
+      updateClassView(c);
+    });
+  }
+
+  function stopBurst() { if (burstTimer) { clearInterval(burstTimer); burstTimer = null; } }
+  function bindHold(btn, c) {
+    var start = function (ev) {
+      if (photoMode || !net) return;
+      ev.preventDefault();
+      grab(c);
+      stopBurst();
+      var n = 0;
+      burstTimer = setInterval(function () {
+        grab(c);
+        if (++n >= 60) stopBurst();
+      }, 130);
+    };
+    btn.addEventListener("pointerdown", start);
+    ["pointerup", "pointerleave", "pointercancel"].forEach(function (e) {
+      btn.addEventListener(e, stopBurst);
+    });
+  }
+
+  /* ---------- 影像 → 特徵 ---------- */
+  function drawCover(src, sw, sh) {
+    var k = Math.max(224 / sw, 224 / sh);
+    var w = sw * k, h = sh * k;
+    wctx.drawImage(src, (224 - w) / 2, (224 - h) / 2, w, h);
+  }
+  function featureOf() {
+    var t = tf.tidy(function () {
+      var px = tf.browser.fromPixels(work);
+      return net.infer(px, true);
+    });
+    var arr = t.dataSync();
+    t.dispose();
+    if (!embDim) { embDim = arr.length; updateArch(); }
+    return Float32Array.from(arr);
+  }
+  function thumbOf() {
+    var c = document.createElement("canvas");
+    c.width = 48; c.height = 48;
+    c.getContext("2d").drawImage(work, 0, 0, 48, 48);
+    return c.toDataURL("image/jpeg", 0.6);
+  }
+  function grab(cls) {
+    if (!net || !video.videoWidth) return;
+    drawCover(video, video.videoWidth, video.videoHeight);
+    cls.samples.push({ f: featureOf(), thumb: thumbOf() });
+    updateClassView(cls); refreshState();
+  }
+
+  /* ---------- 相機 ---------- */
+  function startCam() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { goPhotoMode("這個瀏覽器不提供即時相機。"); return; }
+    stopCam();
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: facing }, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
+    }).then(function (s) {
+      stream = s; video.srcObject = s;
+      var p = video.play(); if (p && p.catch) p.catch(function () {});
+      camMsg.classList.add("hide");
+      video.classList.remove("hide");
+      $("btnFlip").disabled = false;
+      $("btnCam").textContent = "重新開啟相機";
+      photoMode = false; renderClasses();
+    }).catch(function (err) {
+      goPhotoMode(err && err.name === "NotAllowedError"
+        ? "相機權限被拒絕了。可以到瀏覽器設定裡允許，或改用拍照上傳。"
+        : "開不了即時相機（" + (err && err.name ? err.name : "未知原因") + "）。改用拍照上傳一樣可以做完整個練習。");
+    });
+  }
+  function stopCam() {
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+  }
+  function goPhotoMode(msg) {
+    photoMode = true; stopCam(); stopPredict();
+    video.classList.add("hide");
+    camMsg.classList.remove("hide");
+    camMsg.textContent = "拍照模式：用下面的按鈕拍照或從相簿選圖";
+    camWarn.textContent = msg;
+    camWarn.classList.remove("hide");
+    $("btnFlip").disabled = true;
+    $("btnPhoto").classList.add("hide");
+    renderClasses(); renderTestBtn();
+  }
+
+  /* ---------- 檔案輸入 ---------- */
+  fileIn.addEventListener("change", function () {
+    var files = Array.prototype.slice.call(fileIn.files || []);
+    var target = pendingTarget; pendingTarget = null;
+    fileIn.value = "";
+    if (!files.length || !net) return;
+    var i = 0;
+    (function next() {
+      if (i >= files.length) { refreshState(); return; }
+      var f = files[i++];
+      var url = URL.createObjectURL(f);
+      var img = new Image();
+      img.onload = function () {
+        drawCover(img, img.naturalWidth, img.naturalHeight);
+        URL.revokeObjectURL(url);
+        if (target === "test") { showStill(); predictOnce(); }
+        else if (target) { target.samples.push({ f: featureOf(), thumb: thumbOf() }); updateClassView(target); }
+        next();
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); next(); };
+      img.src = url;
+    })();
+  });
+  function showStill() {
+    var s = $("still");
+    if (!s) {
+      s = document.createElement("canvas");
+      s.id = "still"; s.className = "live"; s.width = 224; s.height = 224;
+      $("stage").appendChild(s);
+    }
+    s.getContext("2d").drawImage(work, 0, 0);
+    camMsg.classList.add("hide");
+  }
+  function renderTestBtn() {
+    if (!photoMode || $("btnTest")) return;
+    var b = document.createElement("button");
+    b.id = "btnTest"; b.type = "button"; b.className = "dark";
+    b.textContent = "拍一張來測";
+    b.addEventListener("click", function () { pendingTarget = "test"; fileIn.click(); });
+    $("bars").parentNode.insertBefore(b, $("bars"));
+  }
+
+  function dropHead() { if (head) { head.dispose(); head = null; } stopPredict(); }
+
+  /* ---------- 狀態列 ---------- */
+  function updateArch() {
+    var frozen = "固定不動";
+    try {
+      var ws = net && net.model && net.model.weights;
+      if (ws) {
+        var n = 0;
+        Object.keys(ws).forEach(function (k) { ws[k].forEach(function (w) { n += w.size; }); });
+        if (n > 0) frozen = fmt(n) + " 個參數・固定不動";
+      }
+    } catch (e) {}
+    $("frozenSub").textContent = frozen + (embDim ? "　→　輸出 " + embDim + " 維特徵" : "");
+  }
+  function fmt(n) { return n.toLocaleString("en-US"); }
+
+  function refreshState() {
+    var ok = readyClasses() >= 2 && totalSamples() >= 6;
+    $("btnTrain").disabled = !ok || !net;
+    $("btnTrain").textContent = head ? "重新訓練" : "開始訓練";
+    if (!head) {
+      $("headSub").textContent = embDim
+        ? "輸入 " + embDim + " 維　→　" + classes.length + " 類"
+        : "尚未建立";
+    }
+    $("trainNote").textContent = ok
+      ? "目前共 " + totalSamples() + " 張樣本，" + classes.length + " 個類別。"
+      : "至少要兩個類別、每類 2 張以上才能訓練（建議每類 15 張）。";
+  }
+
+  /* ---------- 訓練 ---------- */
+  var lossHist = [];
+  function buildHead(n) {
+    var m = tf.sequential();
+    m.add(tf.layers.dense({ inputShape: [embDim], units: 100, activation: "relu", useBias: true }));
+    m.add(tf.layers.dense({ units: n, activation: "softmax", useBias: true }));
+    m.compile({ optimizer: tf.train.adam(0.001), loss: "categoricalCrossentropy", metrics: ["accuracy"] });
+    return m;
+  }
+  function train() {
+    var used = classes.filter(function (c) { return c.samples.length >= 2; });
+    if (used.length < 2) return;
+    var xs = [], ys = [];
+    used.forEach(function (c, ci) {
+      c.samples.forEach(function (s) {
+        xs.push(Array.from(s.f));
+        var oh = new Array(used.length).fill(0); oh[ci] = 1;
+        ys.push(oh);
+      });
+    });
+    var X = tf.tensor2d(xs), Y = tf.tensor2d(ys);
+    if (head) { head.dispose(); head = null; }
+    head = buildHead(used.length);
+    head.trainedOn = used;
+    $("headSub").textContent = fmt(head.countParams()) + " 個參數・訓練中…";
+    lossHist = [];
+    $("btnTrain").disabled = true;
+    stopPredict();
+
+    head.fit(X, Y, {
+      epochs: 40, batchSize: Math.max(4, Math.min(16, Math.floor(xs.length / 3))), shuffle: true,
+      callbacks: {
+        onEpochEnd: function (ep, logs) {
+          lossHist.push(logs.loss);
+          $("statEpoch").textContent = (ep + 1) + " / 40";
+          $("statLoss").textContent = logs.loss.toFixed(3);
+          drawChart();
+          return tf.nextFrame();
+        }
+      }
+    }).then(function () {
+      X.dispose(); Y.dispose();
+      $("headSub").textContent = fmt(head.countParams()) + " 個參數・已訓練";
+      $("btnTrain").disabled = false;
+      $("btnTrain").textContent = "重新訓練";
+      startPredict();
+    }).catch(function (e) {
+      X.dispose(); Y.dispose();
+      $("trainNote").textContent = "訓練失敗：" + e.message;
+      $("btnTrain").disabled = false;
+    });
+  }
+
+  function drawChart() {
+    var c = $("lossChart"), ctx = c.getContext("2d");
+    var dpr = window.devicePixelRatio || 1;
+    var w = c.clientWidth || 300, h = c.clientHeight || 70;
+    if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (lossHist.length < 2) return;
+    var pad = 8, mx = Math.max.apply(null, lossHist), mn = Math.min.apply(null, lossHist);
+    var rng = Math.max(1e-6, mx - mn);
+    var css = getComputedStyle(document.documentElement);
+    ctx.strokeStyle = css.getPropertyValue("--amber").trim() || "#D9821B";
+    ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
+    lossHist.forEach(function (v, i) {
+      var x = pad + (w - 2 * pad) * (i / Math.max(1, lossHist.length - 1));
+      var y = pad + (h - 2 * pad) * (1 - (v - mn) / rng);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  /* ---------- 預測 ---------- */
+  function renderBars(probs) {
+    var box = $("bars");
+    var used = (head && head.trainedOn) || [];
+    if (!used.length) return;
+    box.textContent = "";
+    var top = -1, tv = -1;
+    if (probs) probs.forEach(function (p, i) { if (p > tv) { tv = p; top = i; } });
+    used.forEach(function (c, i) {
+      var row = document.createElement("div");
+      row.className = "bar" + (i === top ? " top" : "");
+      var nm = document.createElement("span"); nm.className = "nm"; nm.textContent = c.name;
+      var tr = document.createElement("span"); tr.className = "track";
+      var fl = document.createElement("span"); fl.className = "fill";
+      var p = probs ? probs[i] : 0;
+      fl.style.width = (p * 100).toFixed(1) + "%";
+      tr.appendChild(fl);
+      var pc = document.createElement("span"); pc.className = "pct";
+      pc.textContent = (p * 100).toFixed(1) + "%";
+      row.appendChild(nm); row.appendChild(tr); row.appendChild(pc);
+      box.appendChild(row);
+    });
+  }
+  function predictOnce() {
+    if (!head || !net) return;
+    if (!photoMode) {
+      if (!video.videoWidth) return;
+      drawCover(video, video.videoWidth, video.videoHeight);
+    }
+    var probs = tf.tidy(function () {
+      var px = tf.browser.fromPixels(work);
+      var emb = net.infer(px, true);
+      return head.predict(emb);
+    });
+    var arr = Array.from(probs.dataSync());
+    probs.dispose();
+    renderBars(arr);
+  }
+  function startPredict() {
+    stopPredict();
+    renderBars(null);
+    if (photoMode) { renderTestBtn(); predictOnce(); return; }
+    predTimer = setInterval(predictOnce, 220);
+  }
+  function stopPredict() { if (predTimer) { clearInterval(predTimer); predTimer = null; } }
+
+  /* ---------- 啟動 ---------- */
+  $("btnCam").addEventListener("click", startCam);
+  $("btnFlip").addEventListener("click", function () {
+    facing = (facing === "environment") ? "user" : "environment";
+    startCam();
+  });
+  $("btnPhoto").addEventListener("click", function () { goPhotoMode("已切換成拍照上傳模式。"); });
+  $("btnAddClass").addEventListener("click", function () {
+    if (classes.length >= 8) return;
+    dropHead(); addClass();
+  });
+  $("btnClearAll").addEventListener("click", function () {
+    classes.forEach(function (c) { c.samples = []; });
+    dropHead(); lossHist = []; drawChart();
+    $("statEpoch").textContent = "—"; $("statLoss").textContent = "—";
+    $("bars").textContent = "";
+    var p = document.createElement("p"); p.className = "note";
+    p.textContent = "訓練完成後，這裡會即時顯示模型對鏡頭畫面的判斷。";
+    $("bars").appendChild(p);
+    renderClasses(); refreshState();
+  });
+  $("btnTrain").addEventListener("click", train);
+  window.addEventListener("resize", drawChart);
+
+  addClass("類別 A"); addClass("類別 B"); addClass("類別 C");
+  refreshState();
+
+  if (typeof tf === "undefined" || typeof mobilenet === "undefined") {
+    camMsg.textContent = "載入不到 TensorFlow.js，請確認網路連線後重新整理。";
+    return;
+  }
+  camMsg.textContent = "正在載入 MobileNet（約 2 MB，只要第一次）…";
+  mobilenet.load({ version: 1, alpha: 0.5 }).then(function (m) {
+    net = m;
+    // 暖機一次，順便取得特徵維度
+    wctx.fillStyle = "#888"; wctx.fillRect(0, 0, 224, 224);
+    featureOf();
+    updateArch();
+    camMsg.textContent = "按「開啟相機」開始";
+    $("btnPhoto").classList.remove("hide");
+    refreshState();
+    startCam();
+  }).catch(function (e) {
+    camMsg.textContent = "MobileNet 載入失敗：" + (e && e.message ? e.message : e);
+  });
+})();
+</script>
+</body>
+</html>
