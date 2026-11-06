@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>注意力在看誰</title>
+<meta name="description" content="人工智慧概論 第 11 週｜手算一次自注意力">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* 版面：手機優先單欄。句子 → 標籤 → 選一個發問的字 → 看權重 → 看算式 */
+:root{
+  --paper:#FFFFFF; --tint:#F1F4F7; --solid:#16202A;
+  --text:#1F2A37; --muted:#6B7684; --line:#D8DFE5;
+  --amber:#D9821B; --amber-l:#FAEEDC; --amber-d:#8A5310;
+  --cold:#45718C; --cold-l:#E5EDF2;
+  --font:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#121A22; --tint:#1A242E; --solid:#2B3845;
+    --text:#E6ECF2; --muted:#9AA7B4; --line:#2A3743;
+    --amber:#E89B41; --amber-l:#2A2015; --amber-d:#E89B41;
+    --cold:#7FA8C2; --cold-l:#1B2A35;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#121A22; --tint:#1A242E; --solid:#2B3845;
+  --text:#E6ECF2; --muted:#9AA7B4; --line:#2A3743;
+  --amber:#E89B41; --amber-l:#2A2015; --amber-d:#E89B41;
+  --cold:#7FA8C2; --cold-l:#1B2A35;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper); color:var(--text); font-family:var(--font);
+     font-size:15px; line-height:1.65; -webkit-text-size-adjust:100%}
+.wrap{max-width:760px; margin:0 auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:0 48px}
+h1{font-size:1.45rem; line-height:1.3; margin:0 0 4px; text-wrap:balance}
+h2{font-size:1.0rem; margin:0 0 10px}
+p{margin:0}
+.kicker{font-size:.7rem; letter-spacing:.14em; font-weight:700; color:var(--amber);
+        text-transform:uppercase; margin:0 0 6px}
+.lede{color:var(--muted); font-size:.88rem; margin-top:6px}
+header.top{padding-block:22px 16px; border-bottom:1px solid var(--line)}
+section{padding-block:22px; border-bottom:1px solid var(--line)}
+.note{color:var(--muted); font-size:.84rem; margin-top:10px}
+
+textarea{width:100%; font-family:inherit; font-size:1rem; line-height:1.6; color:var(--text);
+  background:var(--paper); border:1.5px solid var(--line); border-radius:10px; padding:10px 12px;
+  resize:vertical; min-height:74px}
+textarea:focus{outline:none; border-color:var(--amber)}
+.row{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px}
+button{font-family:inherit; font-size:.88rem; border-radius:9px; border:1px solid var(--line);
+  background:var(--paper); color:var(--text); padding:9px 14px; cursor:pointer;
+  line-height:1.3; white-space:nowrap}
+button:focus-visible{outline:2px solid var(--amber); outline-offset:2px}
+button.primary{background:var(--amber); border-color:var(--amber); color:#fff; font-weight:700}
+button.tiny{padding:6px 10px; font-size:.78rem}
+.ex{display:flex; gap:7px; overflow-x:auto; padding-block:4px 2px; margin-top:10px}
+.ex button{flex:0 0 auto; font-size:.8rem; padding:7px 11px; color:var(--cold); border-color:var(--cold)}
+
+/* 詞 chips */
+.toks{display:flex; flex-wrap:wrap; gap:7px; margin-top:4px}
+.tok{border:1.5px solid var(--line); border-radius:9px; background:var(--paper);
+     padding:5px 9px 4px; cursor:pointer; text-align:center; min-width:44px}
+.tok .w{font-size:1rem; font-weight:500; display:block; line-height:1.35}
+.tok .c{font-size:.66rem; color:var(--muted); display:block; line-height:1.3}
+.tok.sel{border-color:var(--amber); background:var(--amber-l)}
+.tok.sel .c{color:var(--amber-d)}
+.tok.unk .c{color:var(--amber)}
+
+.askbar{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:14px;
+  background:var(--cold-l); border-radius:10px; padding:10px 12px}
+.askbar b{font-size:1rem}
+select{font-family:inherit; font-size:.9rem; padding:6px 8px; border-radius:8px;
+  border:1.5px solid var(--line); background:var(--paper); color:var(--text)}
+select:focus{outline:none; border-color:var(--amber)}
+
+/* 權重條 */
+.bars{display:flex; flex-direction:column; gap:6px; margin-top:4px}
+.bar{display:grid; grid-template-columns:minmax(56px,22%) 1fr auto; gap:8px; align-items:center}
+.bar .nm{font-size:.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.bar .track{display:block; height:15px; border-radius:8px; background:var(--tint); overflow:hidden; min-width:0}
+.bar .fill{display:block; height:100%; background:var(--cold); width:0%}
+.bar.top .fill{background:var(--amber)}
+.bar.top .nm{font-weight:700; color:var(--amber-d)}
+.bar .pct{font-size:.82rem; font-variant-numeric:tabular-nums; color:var(--muted);
+  min-width:4.0em; text-align:right}
+
+/* 句子高亮 */
+.sent{display:flex; flex-wrap:wrap; gap:5px; margin-top:4px}
+.sent span{padding:5px 8px; border-radius:7px; font-size:1rem}
+
+table{border-collapse:collapse; width:100%; font-size:.78rem; margin-top:6px}
+th,td{border-bottom:1px solid var(--line); padding:6px 5px; text-align:right;
+      font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{text-align:left; white-space:nowrap}
+table{min-width:470px}
+th{color:var(--muted); font-weight:500; font-size:.72rem; white-space:nowrap}
+.scroller{overflow-x:auto}
+td.hi{color:var(--amber-d); font-weight:700}
+
+.callout{background:var(--solid); color:#fff; border-radius:12px; padding:13px 15px;
+  font-weight:500; font-size:.9rem; margin-top:16px}
+.callout .s{display:block; color:#B7C2CC; font-weight:400; font-size:.82rem; margin-top:5px}
+.warn{background:var(--amber-l); color:var(--amber-d); border-radius:10px;
+  padding:11px 13px; font-size:.84rem; margin-top:14px}
+.checks{display:flex; flex-direction:column; gap:9px}
+.chk{display:flex; gap:9px; align-items:flex-start; font-size:.88rem}
+.chk input{margin-top:4px; flex:0 0 auto; accent-color:var(--amber)}
+.chk .t{display:block; font-weight:500}
+.chk .d{display:block; color:var(--muted); font-size:.82rem; line-height:1.5}
+footer{padding-block:20px; color:var(--muted); font-size:.78rem}
+.hide{display:none!important}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <p class="kicker">人工智慧概論・第 11 週</p>
+  <h1>注意力在看誰</h1>
+  <p class="lede">輸入一句話，點任何一個字，看它把注意力分給了誰。跟投影片第 16 張同一個式子。</p>
+</header>
+
+<section>
+  <h2>1　放一句話進來</h2>
+  <textarea id="inp" rows="2" aria-label="輸入句子">小明把書放在桌上，它很重。</textarea>
+  <div class="row">
+    <button id="go" class="primary">斷詞並計算</button>
+    <button id="clr" class="tiny">清空</button>
+  </div>
+  <div class="ex" id="ex"></div>
+</section>
+
+<section id="secTok">
+  <h2>2　每個詞掛一個標籤</h2>
+  <p class="note" style="margin-top:0">這就是投影片上的 Key。點一個詞當作「發問的字」；想改它的標籤，用下面那個選單。</p>
+  <div class="toks" id="toks"></div>
+  <div class="row" style="margin-top:12px">
+    <label for="catSel" style="font-size:.86rem;color:var(--muted)">把「<b id="catWord">—</b>」的標籤改成</label>
+    <select id="catSel" aria-label="修改選中詞的標籤"></select>
+  </div>
+  <p class="warn hide" id="unkWarn"></p>
+</section>
+
+<section id="secAtt">
+  <h2>3　它在看誰</h2>
+  <div class="askbar">
+    <span>「<b id="askWord">—</b>」在問：</span>
+    <select id="qSel" aria-label="選擇查詢類型"></select>
+  </div>
+  <div class="sent" id="sent"></div>
+  <div class="bars" id="bars"></div>
+  <div class="row">
+    <button id="toggleCalc" class="tiny">看計算過程</button>
+  </div>
+  <div id="calc" class="scroller hide"></div>
+</section>
+
+<section>
+  <h2>4　要找的三件事</h2>
+  <div class="checks">
+    <label class="chk"><input type="checkbox">
+      <span><span class="t">找一個代名詞，看它指回哪裡</span>
+      <span class="d">「它」「他」「this」。它是不是真的指回正確的那個詞？</span></span></label>
+    <label class="chk"><input type="checkbox">
+      <span><span class="t">把關鍵的兩個詞拉遠</span>
+      <span class="d">在中間塞十幾個字，再看一次。權重有沒有掉？（提示：不會。這就是「任兩個字都只隔一步」。）</span></span></label>
+    <label class="chk"><input type="checkbox">
+      <span><span class="t">造一個會讓它看錯的句子</span>
+      <span class="d">放兩個都說得通的候選詞進去，例如「把書和杯子放在桌上，它很重」。截一張圖——這是作業八要交的。</span></span></label>
+  </div>
+  <p class="callout">注意力沒有在「理解」，它在比對。
+    <span class="s">發問的字帶著一個查詢，跟每個詞的標籤比一次，分數高的就拿走比較多權重。從頭到尾沒有一步在「懂」。</span></p>
+</section>
+
+<footer>
+  <b>這個頁面沒有用任何訓練好的模型。</b>
+  每個詞的標籤是查表查出來的，你也可以自己改。它示範的是「注意力怎麼算」，不是「真實的模型學到了什麼」——
+  真正的模型是把這些向量學出來的，運算則一模一樣。全部在你的手機裡執行，不會上傳任何東西。
+</footer>
+
+</div>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ── 標籤系統：五個維度 [人, 物品, 動作, 地點, 形容] ── */
+  var DIM = ["人", "物品", "動作", "地點", "形容"];
+  var D = DIM.length, SQ = Math.sqrt(D);
+
+  var CAT = {
+    "人":    { key: [4, 0, 0, 0, 0], q: "找動作" },
+    "物品":  { key: [0, 4, 0, 0, 0], q: "找形容" },
+    "動作":  { key: [0, 0, 4, 0, 0], q: "找物品" },
+    "地點":  { key: [0, 1, 0, 4, 0], q: "找動作" },
+    "形容":  { key: [0, 2, 0, 0, 4], q: "找物品" },
+    "代名詞（物）": { key: [0, 1, 0, 0, 0], q: "找物品" },
+    "代名詞（人）": { key: [1, 0, 0, 0, 0], q: "找人" },
+    "功能詞": { key: [0, 0, 0, 0, 0], q: "找物品" },
+  };
+  var QUERY = {
+    "找人":   [4, 0, 0, 0, 0],
+    "找物品": [0, 4, 0, 0, 0],
+    "找動作": [0, 0, 4, 0, 0],
+    "找地點": [0, 0, 0, 4, 0],
+    "找形容": [0, 0, 0, 0, 4],
+  };
+
+  /* ── 詞表 ── */
+  var RAW = {
+    "人": "小明 小華 小美 老師 教授 學生 同學 醫生 護士 警察 工程師 爸爸 媽媽 哥哥 姊姊 弟弟 妹妹 朋友 大家 男生 女生 孩子 人 teacher professor student doctor nurse police engineer father mother brother sister friend boy girl child people man woman",
+    "物品": "書 本書 課本 筆記 杯子 水杯 手機 電腦 筆電 相機 耳機 鑰匙 包包 背包 雨傘 傘 球 蛋糕 麵包 咖啡 水 飯 便當 車 腳踏車 機車 花 樹 石頭 箱子 盒子 紙 筆 衣服 鞋子 帽子 眼鏡 book notebook cup phone laptop computer camera headphones key bag umbrella ball cake bread coffee water rice car bike flower tree stone box paper pen clothes shoes hat glasses",
+    "動作": "想起 想起來 借走 拿走 放著 放 放在 擺 拿 拿起 吃 喝 看 讀 寫 跑 走 買 賣 送 丟 撿 打開 關上 找 遇到 喜歡 討厭 修 洗 煮 開 騎 坐 站 睡 笑 哭 說 問 回答 給 借 還 帶 搬 推 拉 put puts place placed take took taking eat ate eating drink drank see saw read write wrote run ran buy bought sell sold give gave like likes love hate fix fixed wash cook open close find found meet met bring brought carry",
+    "地點": "後面 前面 中間 角落 桌上 桌子 地上 教室 學校 家 房間 廚房 車上 公園 圖書館 醫院 店裡 外面 裡面 上面 下面 旁邊 門口 樓下 樓上 table desk floor ground classroom school home house room kitchen park library hospital store shop outside inside upstairs downstairs",
+    "形容": "很累 累 很忙 忙 很餓 餓 很開心 開心 很重 很輕 很髒 很乾淨 很貴 很便宜 很大 很小 很舊 很新 很好吃 很難看 很漂亮 很快 很慢 好看 難看 壞掉 破了 重 輕 髒 乾淨 貴 便宜 大 小 舊 新 漂亮 好吃 快 慢 heavy light dirty clean expensive cheap big small old new beautiful ugly broken delicious fast slow",
+    "代名詞（物）": "它 它們 這 那 這個 那個 這本 那本 這些 那些 it this that these those",
+    "代名詞（人）": "他 她 他們 她們 我 你 我們 你們 您 he she they him her them i you we us me",
+    "功能詞": "的 了 把 被 在 和 跟 與 也 就 都 很 是 有 不 沒 會 要 可以 但是 雖然 因為 所以 而且 之後 以後 昨天 今天 明天 早上 下午 晚上 剛才 才 還 又 再 已經 剛 終於 居然 竟然 果然 總算 一直 本來 結果 意外地 一 二 三 一個 一本 一杯 the a an of to and or but is are was were am be been in on at for with from by as that's",
+  };
+  var LEX = {};
+  Object.keys(RAW).forEach(function (c) {
+    RAW[c].split(/\s+/).forEach(function (w) { if (w) LEX[w] = c; });
+  });
+  var MAXLEN = 0;
+  Object.keys(LEX).forEach(function (w) { if (/[一-鿿]/.test(w)) MAXLEN = Math.max(MAXLEN, w.length); });
+
+  /* ── 斷詞：中文最長比對，英文照空白切 ── */
+  var PUNCT = "，。、？！；：「」『』（）,.!?;:\"'()… ";
+  function tokenize(text) {
+    var out = [], i = 0;
+    while (i < text.length) {
+      var ch = text[i];
+      if (PUNCT.indexOf(ch) >= 0 || ch === "\n") { i++; continue; }
+      if (/[A-Za-z0-9']/.test(ch)) {
+        var j = i;
+        while (j < text.length && /[A-Za-z0-9'-]/.test(text[j])) j++;
+        out.push(text.slice(i, j)); i = j; continue;
+      }
+      var hit = null;
+      for (var L = Math.min(MAXLEN, text.length - i); L >= 1; L--) {
+        var cand = text.substr(i, L);
+        if (LEX[cand]) { hit = cand; break; }
+      }
+      if (hit) { out.push(hit); i += hit.length; }
+      else { out.push(ch); i += 1; }
+      if (out.length > 60) break;
+    }
+    return out;
+  }
+  function lookup(w) {
+    if (LEX[w]) return { cat: LEX[w], known: true };
+    var lw = w.toLowerCase();
+    if (LEX[lw]) return { cat: LEX[lw], known: true };
+    // 沒收錄的單一個中文字，多半是助詞或動詞的一半：當成功能詞，才不會憑空吸走注意力
+    if (w.length === 1 && /[\u4e00-\u9fff]/.test(w)) return { cat: "功能詞", known: false };
+    return { cat: "物品", known: false };
+  }
+
+  /* ── 狀態 ── */
+  var toks = [], sel = 0, qType = null;
+
+  function analyse(text) {
+    var ws = tokenize(text);
+    toks = ws.map(function (w) {
+      var r = lookup(w);
+      return { w: w, cat: r.cat, known: r.known };
+    });
+    if (!toks.length) return;
+    sel = pickDefault();
+    qType = null;
+    renderAll();
+  }
+  function pickDefault() {
+    for (var i = toks.length - 1; i >= 0; i--)
+      if (toks[i].cat.indexOf("代名詞") === 0) return i;
+    for (var k = toks.length - 1; k >= 0; k--)
+      if (toks[k].cat === "形容") return k;
+    return 0;
+  }
+
+  function weights() {
+    var q = QUERY[qType || CAT[toks[sel].cat].q];
+    var sc = toks.map(function (t) {
+      var k = CAT[t.cat].key, s = 0;
+      for (var i = 0; i < D; i++) s += q[i] * k[i];
+      return s / SQ;
+    });
+    var mx = Math.max.apply(null, sc);
+    var ex = sc.map(function (v) { return Math.exp(v - mx); });
+    var sum = ex.reduce(function (a, b) { return a + b; }, 0);
+    return { q: q, sc: sc, ex: ex, sum: sum, w: ex.map(function (v) { return v / sum; }) };
+  }
+
+  /* ── 畫面 ── */
+  function renderToks() {
+    var box = $("toks"); box.textContent = "";
+    var anyUnk = false;
+    toks.forEach(function (t, i) {
+      if (!t.known) anyUnk = true;
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "tok" + (i === sel ? " sel" : "") + (t.known ? "" : " unk");
+      var w = document.createElement("span"); w.className = "w"; w.textContent = t.w;
+      var c = document.createElement("span"); c.className = "c";
+      c.textContent = t.known ? t.cat : t.cat + "？";
+      b.appendChild(w); b.appendChild(c);
+      b.addEventListener("click", function () { sel = i; qType = null; renderAll(); });
+      box.appendChild(b);
+    });
+    var warn = $("unkWarn");
+    if (anyUnk) {
+      warn.textContent = "標著「？」的詞不在詞表裡，先當成「物品」。這不是模型猜的——是我這張表沒收。你可以自己改成對的標籤，改完權重會立刻跟著變。";
+      warn.classList.remove("hide");
+    } else warn.classList.add("hide");
+  }
+
+  function renderSelectors() {
+    $("catWord").textContent = toks[sel].w;
+    $("askWord").textContent = toks[sel].w;
+    var cs = $("catSel"); cs.textContent = "";
+    Object.keys(CAT).forEach(function (c) {
+      var o = document.createElement("option"); o.value = c; o.textContent = c;
+      if (c === toks[sel].cat) o.selected = true;
+      cs.appendChild(o);
+    });
+    var qs = $("qSel"); qs.textContent = "";
+    var cur = qType || CAT[toks[sel].cat].q;
+    Object.keys(QUERY).forEach(function (q) {
+      var o = document.createElement("option"); o.value = q; o.textContent = q;
+      if (q === cur) o.selected = true;
+      qs.appendChild(o);
+    });
+  }
+
+  function renderBars(r) {
+    var top = r.w.indexOf(Math.max.apply(null, r.w));
+    var sb = $("sent"); sb.textContent = "";
+    toks.forEach(function (t, i) {
+      var sp = document.createElement("span");
+      sp.textContent = t.w;
+      var a = 0.06 + 0.94 * (r.w[i] / r.w[top]);
+      sp.style.background = "rgba(217,130,27," + a.toFixed(3) + ")";
+      sp.style.color = r.w[i] > 0.45 ? "#fff" : "var(--text)";
+      if (i === sel) sp.style.outline = "2px solid var(--cold)";
+      sb.appendChild(sp);
+    });
+    var bb = $("bars"); bb.textContent = "";
+    toks.map(function (t, i) { return { t: t, i: i, v: r.w[i] }; })
+      .sort(function (a, b) { return b.v - a.v; })
+      .slice(0, 8)
+      .forEach(function (o) {
+        var row = document.createElement("div");
+        row.className = "bar" + (o.i === top ? " top" : "");
+        var nm = document.createElement("span"); nm.className = "nm"; nm.textContent = o.t.w;
+        var tr = document.createElement("span"); tr.className = "track";
+        var fl = document.createElement("span"); fl.className = "fill";
+        fl.style.width = (o.v * 100).toFixed(2) + "%";
+        tr.appendChild(fl);
+        var pc = document.createElement("span"); pc.className = "pct";
+        pc.textContent = (o.v * 100).toFixed(o.v < 0.01 ? 2 : 1) + "%";
+        row.appendChild(nm); row.appendChild(tr); row.appendChild(pc);
+        bb.appendChild(row);
+      });
+  }
+
+  function renderCalc(r) {
+    var box = $("calc");
+    var top = r.w.indexOf(Math.max.apply(null, r.w));
+    var head = "<p class='note' style='margin:10px 0 2px'>Query（「" + toks[sel].w + "」在找什麼）＝ ["
+      + r.q.join(", ") + "]　　維度順序：[" + DIM.join(", ") + "]　　分數 ＝ Q·K ÷ √" + D + "</p>";
+    var rows = toks.map(function (t, i) {
+      return "<tr><td>" + t.w + "</td><td>" + t.cat + "</td><td>[" + CAT[t.cat].key.join(",") + "]</td>"
+        + "<td>" + (r.sc[i] * SQ).toFixed(0) + "</td>"
+        + "<td>" + r.sc[i].toFixed(2) + "</td>"
+        + "<td>" + r.ex[i].toFixed(3) + "</td>"
+        + "<td class='" + (i === top ? "hi" : "") + "'>" + (r.w[i] * 100).toFixed(2) + "%</td></tr>";
+    }).join("");
+    box.innerHTML = head + "<table><thead><tr><th>詞</th><th>標籤</th><th>Key</th><th>Q·K</th>"
+      + "<th>÷√" + D + "</th><th>exp</th><th>權重</th></tr></thead><tbody>" + rows
+      + "</tbody></table><p class='note'>最後一欄＝ exp ÷ 全部 exp 的總和（" + r.sum.toFixed(3) + "），這一步就是 softmax。</p>";
+  }
+
+  function renderAll() {
+    if (!toks.length) return;
+    renderToks(); renderSelectors();
+    var r = weights();
+    renderBars(r);
+    if (!$("calc").classList.contains("hide")) renderCalc(r);
+  }
+
+  /* ── 事件 ── */
+  var EX = [
+    "小明把書放在桌上，它很重。",
+    "小明把書和杯子放在桌上，它很重。",
+    "老師昨天在圖書館借的那本書，放在教室後面的桌上，它很重。",
+    "小明把手機放在桌上，他很累。",
+    "The student put the book on the table, it is heavy.",
+    "老師把電腦和手機放在教室的桌上，它壞掉了。",
+  ];
+  var exBox = $("ex");
+  EX.forEach(function (t, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.textContent = "例 " + (i + 1);
+    b.title = t;
+    b.addEventListener("click", function () { $("inp").value = t; analyse(t); });
+    exBox.appendChild(b);
+  });
+  $("go").addEventListener("click", function () { analyse($("inp").value); });
+  $("clr").addEventListener("click", function () { $("inp").value = ""; $("inp").focus(); });
+  $("catSel").addEventListener("change", function () {
+    toks[sel].cat = this.value; toks[sel].known = true; qType = null; renderAll();
+  });
+  $("qSel").addEventListener("change", function () { qType = this.value; renderAll(); });
+  $("toggleCalc").addEventListener("click", function () {
+    var c = $("calc");
+    c.classList.toggle("hide");
+    this.textContent = c.classList.contains("hide") ? "看計算過程" : "收起計算過程";
+    if (!c.classList.contains("hide")) renderCalc(weights());
+  });
+
+  analyse($("inp").value);
+})();
+</script>
+</body>
+</html>
