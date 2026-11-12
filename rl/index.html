@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Q-learning 迷宮｜人工智慧概論 第 12 週</title>
+<style>
+:root{--bg:#F6F7F9;--card:#FFFFFF;--ink:#16202A;--text:#1F2A37;--muted:#6B7684;--line:#E2E6EB;
+--amber:#D9821B;--amberL:#FAEEDC;--amberT:#8A5310;--cold:#45718C;--coldL:#E5EDF2;
+--trap:#F6D5D3;--trapT:#B5443C;--goal:#D6EEDC;--goalT:#2E7D4F;--wall:#55606B;--cell:#FFFFFF;--coin:#FFE7A3}
+@media (prefers-color-scheme:dark){:root{--bg:#10161D;--card:#1A232D;--ink:#0B1016;--text:#E6EBF0;--muted:#97A3AF;--line:#2B3642;
+--amberL:#3A2A15;--amberT:#F2B565;--coldL:#1E2F3B;--trap:#4A2523;--trapT:#F29A92;--goal:#1F3B2A;--goalT:#8AD6A6;--wall:#7A8794;--cell:#202B36;--coin:#5A4A1A}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;line-height:1.55;-webkit-text-size-adjust:100%}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 40px}
+header .k{font-size:12px;letter-spacing:.12em;color:var(--amber);font-weight:700}
+h1{font-size:22px;margin:4px 0 2px}
+.sub{color:var(--muted);font-size:14px;margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+svg{display:block;width:100%;height:auto;touch-action:manipulation}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.stat{background:var(--bg);border-radius:10px;padding:8px 6px;text-align:center}
+.stat b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--muted)}
+.msg{margin-top:10px;font-size:14px;padding:10px 12px;border-radius:10px;background:var(--coldL);min-height:44px}
+.msg.warn{background:var(--amberL);color:var(--amberT);font-weight:600}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+button{font:inherit;font-size:16px;font-weight:700;border:0;border-radius:12px;padding:12px 8px;cursor:pointer;color:#fff;background:var(--amber)}
+button.sec{background:var(--cold)}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500;font-size:14px;padding:9px}
+button:disabled{opacity:.45}
+.row{margin:12px 0 4px}
+.row label{display:flex;justify-content:space-between;font-size:15px;font-weight:600}
+.row label output{font-variant-numeric:tabular-nums;color:var(--amber);font-weight:700}
+.row small{display:block;color:var(--muted);font-size:12px}
+input[type=range]{width:100%;accent-color:var(--amber);height:28px;margin:2px 0}
+.sw{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-top:12px}
+.sw input{width:22px;height:22px;accent-color:var(--amber)}
+details summary{cursor:pointer;font-weight:700;font-size:15px;color:var(--cold)}
+h2{font-size:16px;margin:0 0 6px}
+ol{padding-left:20px;margin:6px 0}
+ol li{margin-bottom:6px;font-size:14px}
+.qbox{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+.qbox div{background:var(--bg);border-radius:8px;text-align:center;padding:6px 2px;font-size:12px;color:var(--muted)}
+.qbox div b{display:block;font-size:16px;color:var(--text);font-variant-numeric:tabular-nums}
+.qbox div.best{background:var(--amberL)}
+.qbox div.best b{color:var(--amberT)}
+.hint{font-size:12px;color:var(--muted);margin-top:4px}
+.chart{margin-top:6px}
+footer{text-align:center;font-size:12px;color:var(--muted);margin-top:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="k">人工智慧概論・第 12 週</div>
+  <h1>改獎勵，看它學壞</h1>
+  <p class="sub">Q-learning 迷宮・程式一個字都不用改，只改獎勵。</p>
+</header>
+
+<div class="card">
+  <svg id="maze" viewBox="0 0 600 500" aria-label="迷宮"></svg>
+  <div class="stats">
+    <div class="stat"><b id="sSteps">–</b><span>走了幾步</span></div>
+    <div class="stat"><b id="sRet">–</b><span>總分</span></div>
+    <div class="stat"><b id="sGoal">–</b><span>到終點了嗎</span></div>
+  </div>
+  <div class="msg" id="msg">先按「訓練」，讓它在迷宮裡試 300 回合。</div>
+  <div class="btns">
+    <button id="bTrain">訓練 300 回合</button>
+    <button id="bWalk" class="sec" disabled>看它走一次</button>
+  </div>
+  <div class="btns">
+    <button id="bArrow" class="ghost" disabled>顯示每格的箭頭</button>
+    <button id="bReset" class="ghost">回到預設獎勵</button>
+  </div>
+  <div id="qwrap" style="display:none">
+    <div class="hint" id="qcell">點迷宮任一格，看那格四個方向的分數</div>
+    <div class="qbox" id="qbox"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>獎勵（這是你唯一能改的東西）</h2>
+  <div class="row"><label>走到終點 <output id="oGoal"></output></label><input type="range" id="rGoal" min="0" max="30" step="1"></div>
+  <div class="row"><label>每走一步 <output id="oStep"></output></label><input type="range" id="rStep" min="-3" max="0" step="0.5"><small>撞牆、原地不動也算一步</small></div>
+  <div class="row"><label>踩到陷阱 <output id="oTrap"></output></label><input type="range" id="rTrap" min="-20" max="0" step="0.5"><small>下面那排紅格子，不會結束遊戲</small></div>
+  <label class="sw"><input type="checkbox" id="cCoin">放一枚金幣在左上角</label>
+  <div class="row" id="coinRow"><label>踩到金幣格 <output id="oCoin"></output></label><input type="range" id="rCoin" min="0" max="5" step="0.5"><small>規則：每一步結束時人在金幣格上，就加分</small></div>
+  <details style="margin-top:12px">
+    <summary>進階：學習的參數</summary>
+    <div class="row"><label>探索率 ε <output id="oEps"></output></label><input type="range" id="rEps" min="0" max="0.5" step="0.05"><small>每 100 次有幾次故意亂走</small></div>
+    <div class="row"><label>折扣 γ <output id="oGam"></output></label><input type="range" id="rGam" min="0.5" max="0.99" step="0.01"></div>
+    <div class="row"><label>訓練回合 <output id="oEpi"></output></label><input type="range" id="rEpi" min="50" max="1000" step="50"></div>
+    <div class="row"><label>亂數種子 <output id="oSeed"></output></label><input type="range" id="rSeed" min="1" max="50" step="1"><small>預設 12，跟投影片一樣</small></div>
+  </details>
+</div>
+
+<div class="card">
+  <h2>學習曲線</h2>
+  <div class="hint">每一回合花了幾步（最多 60 步）。橘線是每 10 回合的平均。</div>
+  <svg id="curve" class="chart" viewBox="0 0 600 220"></svg>
+</div>
+
+<div class="card">
+  <h2>今天要找的三件事（作業九）</h2>
+  <ol>
+    <li>陷阱懲罰調到多少，它開始直接穿過去？先算再試。</li>
+    <li>打開金幣，給多少分它就不去終點了？</li>
+    <li>自己設計一種「獎勵寫錯」：讓它做出一件你沒預期、但完全合規則的事。</li>
+  </ol>
+  <div class="hint">每一項截一張圖，加兩句話說明它為什麼這樣做。</div>
+</div>
+<footer>國立臺灣海洋大學　人工智慧概論</footer>
+</div>
+
+<script>
+// 共用 Q-learning 迷宮引擎：網頁與投影片圖表跑的是同一份邏輯、同一個亂數
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    var t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+// 5 列 × 6 行；(列, 行)，列 0 在最上面
+var ROWS = 5, COLS = 6;
+var START = [4, 0], GOAL = [4, 5], COIN = [0, 0];
+var TRAPS = [[4, 1], [4, 2], [4, 3], [4, 4]];
+var WALLS = [[2, 2], [1, 4]];
+var ACTS = [[-1, 0], [0, 1], [1, 0], [0, -1]];   // 上 右 下 左
+function key(r, c) { return r * COLS + c; }
+function isIn(list, r, c) { for (var i = 0; i < list.length; i++) if (list[i][0] === r && list[i][1] === c) return true; return false; }
+
+function step(s, a, R) {
+  var r = Math.floor(s / COLS), c = s % COLS;
+  var nr = r + ACTS[a][0], nc = c + ACTS[a][1];
+  if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS || isIn(WALLS, nr, nc)) { nr = r; nc = c; }
+  var rew = R.step, done = false;
+  if (isIn(TRAPS, nr, nc)) rew += R.trap;
+  if (R.coinOn && nr === COIN[0] && nc === COIN[1]) rew += R.coin;
+  if (nr === GOAL[0] && nc === GOAL[1]) { rew += R.goal; done = true; }
+  return { s: key(nr, nc), r: rew, done: done };
+}
+function argmax(q) { var b = 0; for (var i = 1; i < q.length; i++) if (q[i] > q[b]) b = i; return b; }
+
+function train(R, P, seed) {
+  var rnd = mulberry32(seed);
+  var N = ROWS * COLS, Q = [];
+  for (var i = 0; i < N; i++) Q.push([0, 0, 0, 0]);
+  var hist = [];
+  for (var ep = 0; ep < P.episodes; ep++) {
+    var s = key(START[0], START[1]), G = 0, t = 0, reached = false;
+    for (t = 0; t < P.maxSteps; t++) {
+      var a = (rnd() < P.eps) ? Math.floor(rnd() * 4) : argmax(Q[s]);
+      var o = step(s, a, R);
+      var target = o.r + (o.done ? 0 : P.gamma * Math.max.apply(null, Q[o.s]));
+      Q[s][a] = Q[s][a] + P.alpha * (target - Q[s][a]);
+      G += o.r; s = o.s;
+      if (o.done) { reached = true; t++; break; }
+    }
+    hist.push({ ret: G, steps: t, reached: reached });
+  }
+  return { Q: Q, hist: hist };
+}
+function greedyPath(Q, R, maxSteps) {
+  var s = key(START[0], START[1]), path = [s], G = 0;
+  for (var t = 0; t < maxSteps; t++) {
+    var o = step(s, argmax(Q[s]), R);
+    G += o.r; s = o.s; path.push(s);
+    if (o.done) return { path: path, ret: G, reached: true };
+  }
+  return { path: path, ret: G, reached: false };
+}
+
+var DEF_R = {goal:10, step:-1, trap:-10, coin:3, coinOn:false};
+var DEF_P = {episodes:300, maxSteps:60, alpha:0.5, gamma:0.95, eps:0.1, seed:12};
+var R, P, model = null, showArrows = false, walking = null, selCell = null;
+var $ = function(id){ return document.getElementById(id); };
+var NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent, text){ var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; if (parent) parent.appendChild(e); return e; }
+function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function fmt(x){ x = Math.round(x * 100) / 100; return (x > 0 ? "+" : "") + x; }
+
+var sliders = [["rGoal","oGoal","goal","R"],["rStep","oStep","step","R"],["rTrap","oTrap","trap","R"],["rCoin","oCoin","coin","R"],
+  ["rEps","oEps","eps","P"],["rGam","oGam","gamma","P"],["rEpi","oEpi","episodes","P"],["rSeed","oSeed","seed","P"]];
+function loadDefaults(){
+  R = JSON.parse(JSON.stringify(DEF_R)); P = JSON.parse(JSON.stringify(DEF_P));
+  sliders.forEach(function(s){ $(s[0]).value = (s[3] === "R" ? R : P)[s[2]]; });
+  $("cCoin").checked = false; syncLabels();
+}
+function syncLabels(){
+  sliders.forEach(function(s){ var v = (s[3] === "R" ? R : P)[s[2]]; $(s[1]).textContent = (s[3] === "R") ? fmt(v) : String(v); });
+  $("coinRow").style.opacity = R.coinOn ? 1 : 0.4; $("rCoin").disabled = !R.coinOn;
+  $("bTrain").textContent = "訓練 " + P.episodes + " 回合";
+}
+function invalidate(){
+  stopWalk(); model = null; selCell = null;
+  $("bWalk").disabled = true; $("bArrow").disabled = true; $("qwrap").style.display = "none";
+  ["sSteps","sRet","sGoal"].forEach(function(id){ $(id).textContent = "–"; });
+  setMsg("獎勵改了，它之前學的全部作廢。按「訓練」重新學。", false);
+  drawMaze(null, null); drawCurve();
+}
+sliders.forEach(function(s){
+  $(s[0]).addEventListener("input", function(){ (s[3] === "R" ? R : P)[s[2]] = parseFloat(this.value); syncLabels(); invalidate(); });
+});
+$("cCoin").addEventListener("change", function(){ R.coinOn = this.checked; syncLabels(); invalidate(); });
+$("bReset").addEventListener("click", function(){ loadDefaults(); invalidate(); setMsg("回到預設獎勵：終點 +10、每步 −1、陷阱 −10、沒有金幣。", false); });
+$("bArrow").addEventListener("click", function(){ showArrows = !showArrows; this.textContent = showArrows ? "隱藏箭頭" : "顯示每格的箭頭"; drawMaze(walking ? walking.pos : null, walking ? walking.trail : null); });
+
+function setMsg(t, warn){ var m = $("msg"); m.textContent = t; m.className = "msg" + (warn ? " warn" : ""); }
+
+/* ---------- 迷宮 ---------- */
+var CS = 100;
+function drawMaze(pos, trail){
+  var svg = $("maze"); while (svg.firstChild) svg.removeChild(svg.firstChild);
+  for (var r = 0; r < ROWS; r++) for (var c = 0; c < COLS; c++){
+    var fill = css("--cell"), lab = "", labC = css("--muted");
+    if (isIn(WALLS, r, c)) fill = css("--wall");
+    else if (isIn(TRAPS, r, c)) { fill = css("--trap"); lab = "陷阱 " + fmt(R.trap); labC = css("--trapT"); }
+    else if (r === GOAL[0] && c === GOAL[1]) { fill = css("--goal"); lab = "終點 " + fmt(R.goal); labC = css("--goalT"); }
+    else if (r === START[0] && c === START[1]) { fill = css("--coldL"); lab = "起點"; labC = css("--cold"); }
+    else if (R.coinOn && r === COIN[0] && c === COIN[1]) { fill = css("--coin"); lab = "金幣 " + fmt(R.coin); labC = css("--amberT"); }
+    var rect = el("rect", {x:c*CS+1, y:r*CS+1, width:CS-2, height:CS-2, rx:6, fill:fill, stroke: selCell === key(r,c) ? css("--amber") : css("--line"), "stroke-width": selCell === key(r,c) ? 4 : 1}, svg);
+    (function(k){ rect.addEventListener("click", function(){ if (!model) return; if (isIn(WALLS, Math.floor(k/COLS), k%COLS)) return; selCell = k; showQ(k); drawMaze(walking ? walking.pos : null, walking ? walking.trail : null); }); })(key(r, c));
+    if (lab) el("text", {x:c*CS+CS/2, y:r*CS+CS-12, "text-anchor":"middle", "font-size":17, fill:labC, "font-weight":700, "pointer-events":"none"}, svg, lab);
+    if (showArrows && model && !isIn(WALLS, r, c) && !(r === GOAL[0] && c === GOAL[1])){
+      var q = model.Q[key(r, c)];
+      if (q.some(function(v){ return v !== 0; })){
+        var a = argmax(q), cx = c*CS+CS/2, cy = r*CS+CS/2 - 8, d = ACTS[a];
+        el("line", {x1:cx-d[1]*22, y1:cy-d[0]*22, x2:cx+d[1]*22, y2:cy+d[0]*22, stroke:css("--muted"), "stroke-width":4, "stroke-linecap":"round", "marker-end":"url(#ah)", "pointer-events":"none"}, svg);
+      }
+    }
+  }
+  var defs = el("defs", {}, svg), mk = el("marker", {id:"ah", viewBox:"0 0 10 10", refX:5, refY:5, markerWidth:4, markerHeight:4, orient:"auto-start-reverse"}, defs);
+  el("path", {d:"M0,0 L10,5 L0,10 z", fill:css("--muted")}, mk);
+  if (trail && trail.length > 1){
+    var pts = trail.map(function(k){ return (k%COLS*CS+CS/2) + "," + (Math.floor(k/COLS)*CS+CS/2); }).join(" ");
+    el("polyline", {points:pts, fill:"none", stroke:css("--amber"), "stroke-width":7, "stroke-linejoin":"round", "stroke-linecap":"round", opacity:.85, "pointer-events":"none"}, svg);
+  }
+  var p = (pos == null) ? key(START[0], START[1]) : pos;
+  el("circle", {cx:p%COLS*CS+CS/2, cy:Math.floor(p/COLS)*CS+CS/2, r:20, fill:css("--amber"), stroke:"#fff", "stroke-width":4, "pointer-events":"none"}, svg);
+}
+function showQ(k){
+  $("qwrap").style.display = "block";
+  var r = Math.floor(k/COLS), c = k%COLS, q = model.Q[k], b = argmax(q), names = ["往上","往右","往下","往左"];
+  $("qcell").textContent = "第 " + (r+1) + " 列、第 " + (c+1) + " 行這一格，四個方向的分數（最高的那個就是它會選的）";
+  var box = $("qbox"); box.innerHTML = "";
+  for (var i = 0; i < 4; i++){ var d = document.createElement("div"); if (i === b) d.className = "best"; d.innerHTML = names[i] + "<b>" + fmt(q[i]) + "</b>"; box.appendChild(d); }
+}
+
+/* ---------- 學習曲線 ---------- */
+function drawCurve(){
+  var svg = $("curve"); while (svg.firstChild) svg.removeChild(svg.firstChild);
+  var L = 44, Rr = 590, T = 12, B = 186, W = Rr - L, H = B - T;
+  el("line", {x1:L, y1:B, x2:Rr, y2:B, stroke:css("--line"), "stroke-width":2}, svg);
+  [0, 20, 40, 60].forEach(function(v){ var y = B - v/60*H; el("line", {x1:L, y1:y, x2:Rr, y2:y, stroke:css("--line"), "stroke-width":1}, svg); el("text", {x:L-8, y:y+5, "text-anchor":"end", "font-size":14, fill:css("--muted")}, svg, v); });
+  if (!model){ el("text", {x:L+W/2, y:T+H/2, "text-anchor":"middle", "font-size":16, fill:css("--muted")}, svg, "訓練之後這裡會出現曲線"); return; }
+  var h = model.hist, n = h.length;
+  el("text", {x:L, y:212, "font-size":14, fill:css("--muted")}, svg, "第 1 回合");
+  el("text", {x:Rr, y:212, "text-anchor":"end", "font-size":14, fill:css("--muted")}, svg, "第 " + n + " 回合");
+  var raw = h.map(function(e, i){ return (L + (n === 1 ? 0 : i/(n-1)*W)) + "," + (B - e.steps/60*H); }).join(" ");
+  el("polyline", {points:raw, fill:"none", stroke:css("--cold"), "stroke-width":1.2, opacity:.45}, svg);
+  var avg = [];
+  for (var i = 0; i < n; i++){ var s = 0, m = 0; for (var j = Math.max(0, i-9); j <= i; j++){ s += h[j].steps; m++; } avg.push((L + (n === 1 ? 0 : i/(n-1)*W)) + "," + (B - s/m/60*H)); }
+  el("polyline", {points:avg.join(" "), fill:"none", stroke:css("--amber"), "stroke-width":3}, svg);
+}
+
+/* ---------- 訓練與走路 ---------- */
+$("bTrain").addEventListener("click", function(){
+  stopWalk(); selCell = null; $("qwrap").style.display = "none";
+  model = train(R, P, P.seed);
+  var g = greedyPath(model.Q, R, P.maxSteps); model.greedy = g;
+  var first = -1; for (var i = 0; i < model.hist.length; i++) if (model.hist[i].reached){ first = i + 1; break; }
+  $("bWalk").disabled = false; $("bArrow").disabled = false;
+  $("sSteps").textContent = "–"; $("sRet").textContent = "–"; $("sGoal").textContent = "–";
+  setMsg("訓練完成。" + (first > 0 ? "它在第 " + first + " 回合第一次摸到終點。" : P.episodes + " 回合裡它一次都沒走到終點。") + "按「看它走一次」，看它學到了什麼。", false);
+  drawMaze(null, null); drawCurve();
+});
+$("bWalk").addEventListener("click", function(){
+  if (!model) return; stopWalk();
+  var g = model.greedy, i = 0, total = 0, k0 = key(START[0], START[1]);
+  walking = {pos:k0, trail:[k0], timer:null};
+  $("sGoal").textContent = "…";
+  function tick(){
+    if (i >= g.path.length - 1){ finish(); return; }
+    var o = step(g.path[i], argmax(model.Q[g.path[i]]), R); total += o.r; i++;
+    walking.pos = g.path[i]; walking.trail.push(g.path[i]);
+    $("sSteps").textContent = i; $("sRet").textContent = fmt(total);
+    drawMaze(walking.pos, walking.trail);
+    walking.timer = setTimeout(tick, i < 12 ? 260 : 90);
+  }
+  function finish(){
+    $("sGoal").textContent = g.reached ? "到了" : "沒到";
+    var bumps = 0; for (var j = 1; j < g.path.length; j++) if (g.path[j] === g.path[j-1]) bumps++;
+    if (g.reached){
+      var traps = g.path.filter(function(k){ return isIn(TRAPS, Math.floor(k/COLS), k%COLS); }).length;
+      setMsg("走了 " + (g.path.length-1) + " 步到終點，總分 " + fmt(g.ret) + (traps ? "。它直接踩過 " + traps + " 個陷阱——對它來說這樣比較划算。" : "，一個陷阱都沒踩。"), traps > 0);
+    } else if (bumps > 20 && R.coinOn && g.path[g.path.length-1] === key(COIN[0], COIN[1])){
+      setMsg("它不去終點了：躲在金幣格撞牆原地不動，撞了 " + bumps + " 次，每一步都算「踩到金幣」，總分 " + fmt(g.ret) + "。它完全照規則做——是規則寫錯了。", true);
+    } else {
+      setMsg("走滿 " + P.maxSteps + " 步都沒到終點，總分 " + fmt(g.ret) + "。想想看：在這組獎勵下，它為什麼沒有理由去終點？", true);
+    }
+    walking.timer = null;
+  }
+  tick();
+});
+function stopWalk(){ if (walking && walking.timer) clearTimeout(walking.timer); walking = null; }
+
+loadDefaults(); drawMaze(null, null); drawCurve();
+if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function(){ drawMaze(walking ? walking.pos : null, walking ? walking.trail : null); drawCurve(); });
+</script>
+</body>
+</html>
